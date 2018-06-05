@@ -240,6 +240,44 @@ position in the CONTENT."
         (let ((positions (origami-get-positions content regex)))
           (origami-build-pair-tree create start-marker end-marker positions))))))
 
+
+(defun origami-parser-imenu-flat (create)
+  "Origami parser producing folds for each imenu entry, without nesting."
+  (lambda (content)
+    (let ((orig-major-mode major-mode))
+      (with-temp-buffer
+        (insert content)
+        (funcall orig-major-mode)
+        (let* ((items
+                (-as-> (imenu--make-index-alist t) items
+                       (-flatten items)
+                       (-filter 'listp items)))
+               (positions
+                (-as-> (-map #'cdr items) positions
+                       (-filter 'identity positions)
+                       (-map-when 'markerp 'marker-position positions)
+                       (-filter 'natnump positions)
+                       (cons (point-min) positions)
+                       (-snoc positions (point-max))
+                       (-sort '< positions)
+                       (-uniq positions)))
+               (ranges
+                (-zip-pair positions (-map '1- (cdr positions))))
+               (fold-nodes
+                (--map
+                 (-let*
+                     (((range-beg . range-end) it)
+                      (line-beg
+                       (progn (goto-char range-beg)
+                              (line-beginning-position)))
+                      (offset
+                       (- (min (line-end-position) range-end) line-beg))
+                      (fold-node
+                       (funcall create line-beg range-end offset nil)))
+                   fold-node)
+                 ranges)))
+          fold-nodes)))))
+
 (defcustom origami-parser-alist
   `((java-mode             . origami-java-parser)
     (c-mode                . origami-c-parser)
@@ -251,7 +289,7 @@ position in the CONTENT."
     (js3-mode              . origami-c-style-parser)
     (go-mode               . origami-c-style-parser)
     (php-mode              . origami-c-style-parser)
-    (python-mode           . origami-python-parser)
+    (python-mode           . origami-parser-imenu-flat)
     (emacs-lisp-mode       . origami-elisp-parser)
     (lisp-interaction-mode . origami-elisp-parser)
     (clojure-mode          . origami-clj-parser)
